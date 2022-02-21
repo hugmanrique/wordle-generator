@@ -1,0 +1,18 @@
+[package]
+name = "wordle-generator"
+version = "0.1.0"
+authors = ["Hugo Manrique <cargo@hugmanrique.me>"]
+edition = "2021"
+description = "Secure Wordle generation in constant time and memory"
+repository = "https://github.com/hugmanrique/wordle-generator"
+license = "MIT"
+keywords = ["wordle", "random", "feistel"]
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+rand = "0.8.5"
+wyhash = "0.5.0"
+
+[dev-dependencies]
+lazy_static = "1.4.0"
