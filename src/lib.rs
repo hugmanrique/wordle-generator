@@ -1,3 +1,4 @@
+#![feature(slice_as_chunks)]
 use crate::feistel::{FeistelNetwork, KEY_LEN};
 use std::iter::Skip;
 
@@ -6,12 +7,13 @@ pub mod feistel;
 pub struct Wordle<'a, T: AsRef<str>> {
     day: usize,
     words: &'a [T],
+    //key: &'a [u8; KEY_LEN],
     network: FeistelNetwork,
 }
 
 impl<'a, T: AsRef<str>> Wordle<'a, T> {
     pub fn new(words: &'a [T]) -> Self {
-        let network_len = FeistelNetwork::next_len(words.len());
+        let network_len = FeistelNetwork::bit_len_for(words.len());
         Wordle {
             day: 0,
             words,
@@ -19,12 +21,12 @@ impl<'a, T: AsRef<str>> Wordle<'a, T> {
         }
     }
 
-    pub fn new_with_key(words: &'a [T], key: [u8; KEY_LEN]) -> Self {
-        let network_len = FeistelNetwork::next_len(words.len());
+    pub fn with_key(words: &'a [T], key: [u8; KEY_LEN]) -> Self {
+        let network_len = FeistelNetwork::bit_len_for(words.len());
         Wordle {
             day: 0,
             words,
-            network: FeistelNetwork::new_with_key(network_len, key),
+            network: FeistelNetwork::with_key(network_len, key),
         }
     }
 }
@@ -42,6 +44,7 @@ impl<'a, T: AsRef<str>> Iterator for Wordle<'a, T> {
 
         self.day += 1;
         if self.day == self.words.len() {
+            // todo: roll key
             self.day = 0;
         }
         Some(word)
@@ -54,6 +57,7 @@ impl<'a, T: AsRef<str>> Iterator for Wordle<'a, T> {
 
     fn nth(&mut self, n: usize) -> Option<Self::Item> {
         self.day = (self.day + n) % self.words.len();
+        // todo: roll key if necessary
         self.next()
     }
 }

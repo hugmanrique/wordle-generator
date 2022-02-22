@@ -3,76 +3,148 @@ use rand::RngCore;
 use std::hash::Hasher;
 use wyhash::WyHash;
 
-pub const KEY_LEN: usize = 32;
-const DEFAULT_ROUNDS: u8 = 8;
+// The Luby-Rackoff theorem shows that 4 rounds are enough to resist all
+// adaptive chosen plaintext and chosen ciphertext attacks, for sufficiently
+// large block sizes. However, we support arbitrarily small domains.
+const ROUNDS: usize = 8;
 
+// WyHash uses a 64-bit seed.
+const SUBKEY_LEN: usize = std::mem::size_of::<u64>();
+
+/// The length of a [Feistel network] key in bytes.
+///
+/// [Feistel network](`Feistel network`)
+pub const KEY_LEN: usize = ROUNDS * SUBKEY_LEN;
+
+/// A Feistel network of length `2n` provides a random permutation of
+/// the set {0, 1, ..., 2^(2n - 1)}, based on the given key.
 pub struct FeistelNetwork {
-    #[cfg(debug_assertions)]
-    len: u8,
-    left_shift: u8,
-    right_mask: u64,
-    key: [u8; KEY_LEN],
-    rounds: u8,
+    keys: [u64; ROUNDS],
+    upper_shift: u8,
+    lower_mask: u64,
 }
 
 impl FeistelNetwork {
-    pub fn new(len: u8) -> Self {
+    /// Creates a Feistel network with a randomly-generated key to
+    /// permute a domain with `2^bit_len` elements.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `bit_len` is odd, equal to zero, or greater than `u64::BITS`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use wordle_generator::feistel::FeistelNetwork;
+    ///
+    /// let network = FeistelNetwork::new(4);
+    ///
+    /// assert_eq!(network.permute(1), network.permute(1));
+    /// assert_ne!(network.permute(2), network.permute(3));
+    /// ```
+    ///
+    /// ```should_panic
+    /// use wordle_generator::feistel::FeistelNetwork;
+    ///
+    /// FeistelNetwork::new(23);
+    /// ```
+    ///
+    /// ```should_panic
+    /// use wordle_generator::feistel::FeistelNetwork;
+    ///
+    /// FeistelNetwork::new(u64::BITS as u8 + 1);
+    /// ```
+    pub fn new(bit_len: u8) -> Self {
         let mut key = [0u8; KEY_LEN];
         OsRng.fill_bytes(&mut key);
-        Self::new_with_key(len, key)
+        Self::with_key(bit_len, key)
     }
 
-    pub fn new_with_key(len: u8, key: [u8; KEY_LEN]) -> Self {
-        assert!(0 < len && len < u64::BITS as u8);
-        // left and right substrings must have the same length
-        assert_eq!(len % 2, 0, "unbalanced network, len {} should be even", len);
-
-        let left_shift = len / 2;
+    /// Creates a Feistel network with the given key to permute
+    /// a domain with `2^bit_len` elements.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `bit_len` is odd, equal to zero, or greater than `u64::BITS`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use wordle_generator::feistel::{FeistelNetwork, KEY_LEN};
+    ///
+    /// let key = [0xAB; KEY_LEN];
+    /// let network = FeistelNetwork::with_key(12, key);
+    ///
+    /// assert_eq!(network.permute(1234), 26);
+    /// assert_eq!(network.permute(2134), 2827);
+    /// assert_eq!(network.permute(0x0F00), 1964);
+    /// assert_eq!(network.permute(1234), 26);
+    /// ```
+    pub fn with_key(bit_len: u8, key: [u8; KEY_LEN]) -> Self {
+        assert!(
+            0 < bit_len && bit_len <= u64::BITS as u8,
+            "bit_len (is {}) should be positive and < {}",
+            bit_len,
+            u64::BITS
+        );
+        assert_eq!(bit_len & 1, 0, "bit_len (is {}) should be even", bit_len);
+        let upper_shift = bit_len / 2;
         Self {
-            #[cfg(debug_assertions)]
-            len,
-            left_shift,
-            right_mask: (1u64 << left_shift) - 1,
-            key,
-            rounds: DEFAULT_ROUNDS,
+            keys: Self::create_subkeys(key),
+            upper_shift,
+            lower_mask: (1u64 << upper_shift) - 1,
         }
+    }
+
+    // Derive sequence of round keys to resist slide attacks.
+    fn create_subkeys(key: [u8; KEY_LEN]) -> [u64; ROUNDS] {
+        let int_bytes: [[u8; SUBKEY_LEN]; ROUNDS] =
+            // SAFETY: `KEY_LEN` is a multiple of `SUBKEY_LEN`
+            unsafe { key.as_chunks_unchecked() }.try_into().unwrap();
+        int_bytes.map(u64::from_le_bytes)
     }
 
     pub fn permute(&self, input: u64) -> u64 {
-        #[cfg(debug_assertions)]
-        debug_assert_eq!(
-            input >> self.len,
-            0,
-            "input (is {}) bit length should be < len (is {})",
-            input,
-            self.len
-        );
-
-        let mut left = input >> self.left_shift;
-        let mut right = input & self.right_mask;
-        for i in 0..self.rounds {
-            let f = self.round(i, right) & self.right_mask;
-            let new_right = left ^ f;
-            left = right;
-            right = new_right;
+        // TODO: assert input < max.
+        let mut upper = input >> self.upper_shift;
+        let mut lower = input & self.lower_mask;
+        for i in 0..ROUNDS {
+            let new_lower = upper ^ self.round(lower, self.keys[i]);
+            upper = lower;
+            lower = new_lower;
         }
-
-        (left << self.left_shift) | right
+        lower << self.upper_shift | upper
     }
 
-    pub fn round(&self, round: u8, right: u64) -> u64 {
-        let mut hasher = WyHash::default();
-        hasher.write(&self.key);
-        hasher.write_u8(round);
-        hasher.write_u64(right);
-        hasher.finish()
+    fn round(&self, lower: u64, subkey: u64) -> u64 {
+        let mut hasher = WyHash::with_seed(subkey);
+        // todo: key whitening
+        hasher.write_u64(lower);
+        hasher.finish() & self.lower_mask
     }
 
-    pub fn next_len(domain_size: usize) -> u8 {
-        assert!(domain_size > 0, "element count must be positive");
+    /// Computes the minimum bit length of a Feistel network that
+    /// can permute `domain_size` elements.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the domain size is zero.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use wordle_generator::feistel::FeistelNetwork;
+    ///
+    /// assert_eq!(FeistelNetwork::bit_len_for(2), 2);
+    /// assert_eq!(FeistelNetwork::bit_len_for(347), 10);
+    /// assert_eq!(FeistelNetwork::bit_len_for(0x45_F58D), 24);
+    /// assert_eq!(FeistelNetwork::bit_len_for(usize::MAX), usize::BITS as u8);
+    /// ```
+    pub fn bit_len_for(domain_size: usize) -> u8 {
+        assert!(domain_size > 0, "domain cannot be empty");
         let mut len = usize::BITS - domain_size.leading_zeros();
         if len % 2 == 1 {
-            len += 1;
+            len += 1; // balance
         }
         len.try_into().unwrap()
     }
@@ -83,20 +155,9 @@ mod tests {
     use super::{FeistelNetwork, KEY_LEN};
 
     #[test]
-    fn permute() {
-        let key = [0; KEY_LEN];
-        let network = FeistelNetwork::new_with_key(12, key);
-
-        assert_eq!(network.permute(1234), 2458);
-        assert_eq!(network.permute(2134), 3247);
-        assert_eq!(network.permute(0x0F00), 2211);
-        assert_eq!(network.permute(1234), 2458);
-    }
-
-    #[test]
     fn bijective() {
         let key = [0xAB; KEY_LEN];
-        let network = FeistelNetwork::new_with_key(12, key);
+        let network = FeistelNetwork::with_key(12, key);
 
         let mut seen = [false; 4096];
         for value in 0..4096 {
@@ -110,7 +171,7 @@ mod tests {
     #[test]
     fn idempotent() {
         let key = [0xCD; KEY_LEN];
-        let network = FeistelNetwork::new_with_key(8, key);
+        let network = FeistelNetwork::with_key(8, key);
 
         for value in 0..256 {
             let expected = network.permute(value);
@@ -124,24 +185,5 @@ mod tests {
     #[should_panic]
     fn len_must_be_positive() {
         FeistelNetwork::new(0);
-    }
-
-    #[test]
-    #[should_panic]
-    fn unbalanced() {
-        // len must be even
-        FeistelNetwork::new(63);
-    }
-
-    #[test]
-    #[should_panic]
-    fn one_bit_is_unbalanced() {
-        FeistelNetwork::new(1);
-    }
-
-    #[test]
-    fn next_len() {
-        assert_eq!(FeistelNetwork::next_len(2), 2);
-        assert_eq!(FeistelNetwork::next_len(347), 10);
     }
 }
