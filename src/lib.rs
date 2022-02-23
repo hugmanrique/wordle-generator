@@ -1,5 +1,5 @@
 #![feature(slice_as_chunks)]
-use crate::feistel::{FeistelNetwork, KEY_LEN};
+use crate::feistel::{FeistelNetwork, ROUNDS};
 use std::iter::Skip;
 
 pub mod feistel;
@@ -21,12 +21,12 @@ impl<'a, T: AsRef<str>> Wordle<'a, T> {
         }
     }
 
-    pub fn with_key(words: &'a [T], key: [u8; KEY_LEN]) -> Self {
+    pub fn with_key(words: &'a [T], key: [u64; ROUNDS]) -> Self {
         let network_len = FeistelNetwork::bit_len_for(words.len());
         Wordle {
             day: 0,
             words,
-            network: FeistelNetwork::with_key(network_len, key),
+            network: FeistelNetwork::with_keys(network_len, key),
         }
     }
 }

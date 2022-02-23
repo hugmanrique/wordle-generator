@@ -1,12 +1,10 @@
-use rand::rngs::OsRng;
-use rand::RngCore;
 use std::hash::Hasher;
 use wyhash::WyHash;
 
 // The Luby-Rackoff theorem shows that 4 rounds are enough to resist all
 // adaptive chosen plaintext and chosen ciphertext attacks, for sufficiently
 // large block sizes. However, we support arbitrarily small domains.
-const ROUNDS: usize = 8;
+pub const ROUNDS: usize = 8;
 
 // WyHash uses a 64-bit seed.
 const SUBKEY_LEN: usize = std::mem::size_of::<u64>();
@@ -14,10 +12,10 @@ const SUBKEY_LEN: usize = std::mem::size_of::<u64>();
 /// The length of a [Feistel network] key in bytes.
 ///
 /// [Feistel network](`Feistel network`)
-pub const KEY_LEN: usize = ROUNDS * SUBKEY_LEN;
+const KEY_LEN: usize = ROUNDS * SUBKEY_LEN;
 
 /// A Feistel network of length `2n` provides a random permutation of
-/// the set {0, 1, ..., 2^(2n - 1)}, based on the given key.
+/// the set {0, 1, ..., 2^(2n - 1)}, based on the given round keys.
 pub struct FeistelNetwork {
     keys: [u64; ROUNDS],
     upper_shift: u8,
@@ -55,13 +53,12 @@ impl FeistelNetwork {
     /// FeistelNetwork::new(u64::BITS as u8 + 1);
     /// ```
     pub fn new(bit_len: u8) -> Self {
-        let mut key = [0u8; KEY_LEN];
-        OsRng.fill_bytes(&mut key);
-        Self::with_key(bit_len, key)
+        let keys = rand::random();
+        Self::with_keys(bit_len, keys)
     }
 
-    /// Creates a Feistel network with the given key to permute
-    /// a domain with `2^bit_len` elements.
+    /// Creates a Feistel network with the given round keys to
+    /// permute a domain with `2^bit_len` elements.
     ///
     /// # Panics
     ///
@@ -70,38 +67,30 @@ impl FeistelNetwork {
     /// # Examples
     ///
     /// ```
-    /// use wordle_generator::feistel::{FeistelNetwork, KEY_LEN};
+    /// use wordle_generator::feistel::{FeistelNetwork, ROUNDS};
     ///
-    /// let key = [0xAB; KEY_LEN];
-    /// let network = FeistelNetwork::with_key(12, key);
+    /// let round_keys = [0xAB; ROUNDS];
+    /// let network = FeistelNetwork::with_keys(12, round_keys);
     ///
     /// assert_eq!(network.permute(1234), 26);
     /// assert_eq!(network.permute(2134), 2827);
     /// assert_eq!(network.permute(0x0F00), 1964);
     /// assert_eq!(network.permute(1234), 26);
     /// ```
-    pub fn with_key(bit_len: u8, key: [u8; KEY_LEN]) -> Self {
+    pub fn with_keys(bit_len: u8, keys: [u64; ROUNDS]) -> Self {
         assert!(
             0 < bit_len && bit_len <= u64::BITS as u8,
             "bit_len (is {}) should be positive and < {}",
             bit_len,
             u64::BITS
         );
-        assert_eq!(bit_len & 1, 0, "bit_len (is {}) should be even", bit_len);
+        assert_eq!(bit_len % 2, 0, "bit_len (is {}) should be even", bit_len);
         let upper_shift = bit_len / 2;
         Self {
-            keys: Self::create_subkeys(key),
+            keys,
             upper_shift,
             lower_mask: (1u64 << upper_shift) - 1,
         }
-    }
-
-    // Derive sequence of round keys to resist slide attacks.
-    fn create_subkeys(key: [u8; KEY_LEN]) -> [u64; ROUNDS] {
-        let int_bytes: [[u8; SUBKEY_LEN]; ROUNDS] =
-            // SAFETY: `KEY_LEN` is a multiple of `SUBKEY_LEN`
-            unsafe { key.as_chunks_unchecked() }.try_into().unwrap();
-        int_bytes.map(u64::from_le_bytes)
     }
 
     pub fn permute(&self, input: u64) -> u64 {
@@ -116,11 +105,18 @@ impl FeistelNetwork {
         lower << self.upper_shift | upper
     }
 
-    fn round(&self, lower: u64, subkey: u64) -> u64 {
-        let mut hasher = WyHash::with_seed(subkey);
+    fn round(&self, lower: u64, key: u64) -> u64 {
+        let mut hasher = WyHash::with_seed(key);
         // todo: key whitening
         hasher.write_u64(lower);
         hasher.finish() & self.lower_mask
+    }
+
+    /// Returns a mutable reference to the array of round keys
+    /// used by the Feistel network. This can be used to rotate
+    /// the keys.
+    pub fn keys_mut(&mut self) -> &mut [u64; ROUNDS] {
+        &mut self.keys
     }
 
     /// Computes the minimum bit length of a Feistel network that
@@ -152,12 +148,12 @@ impl FeistelNetwork {
 
 #[cfg(test)]
 mod tests {
-    use super::{FeistelNetwork, KEY_LEN};
+    use super::{FeistelNetwork, ROUNDS};
 
     #[test]
     fn bijective() {
-        let key = [0xAB; KEY_LEN];
-        let network = FeistelNetwork::with_key(12, key);
+        let keys = [0xAB; ROUNDS];
+        let network = FeistelNetwork::with_keys(12, keys);
 
         let mut seen = [false; 4096];
         for value in 0..4096 {
@@ -170,8 +166,8 @@ mod tests {
 
     #[test]
     fn idempotent() {
-        let key = [0xCD; KEY_LEN];
-        let network = FeistelNetwork::with_key(8, key);
+        let keys = [0xCD; ROUNDS];
+        let network = FeistelNetwork::with_keys(8, keys);
 
         for value in 0..256 {
             let expected = network.permute(value);

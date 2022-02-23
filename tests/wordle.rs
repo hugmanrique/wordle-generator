@@ -1,6 +1,6 @@
 use lazy_static::lazy_static;
 use std::collections::HashMap;
-use wordle_generator::feistel::KEY_LEN;
+use wordle_generator::feistel::ROUNDS;
 use wordle_generator::Wordle;
 
 lazy_static! {
@@ -11,7 +11,7 @@ lazy_static! {
 
 #[test]
 fn first_days() {
-    let key = [0xF0; KEY_LEN];
+    let key = [0xF0; ROUNDS];
     let mut wordle = Wordle::with_key(&WORDS, key);
 
     assert_eq!(wordle.next(), Some("craws"));
@@ -24,7 +24,7 @@ fn first_days() {
 
 #[test]
 fn nth() {
-    let key = [0xF0; KEY_LEN];
+    let key = [0xF0; ROUNDS];
     let mut wordle = Wordle::with_key(&WORDS, key);
 
     assert_eq!(wordle.nth(0), Some("craws"));
@@ -36,7 +36,7 @@ fn nth() {
 
 #[test]
 fn all_words_before_new_start() {
-    let key = [123; KEY_LEN];
+    let key = [123; ROUNDS];
     let mut wordle = Wordle::with_key(&WORDS, key);
 
     let mut occurrences = HashMap::new();
@@ -51,3 +51,5 @@ fn all_words_before_new_start() {
         assert!(occurrences.values().all(|&x| x == i));
     }
 }
+
+// todo: test non-periodicity
