@@ -1,63 +1,55 @@
-#![feature(slice_as_chunks)]
-use crate::feistel::{FeistelNetwork, ROUNDS};
-use std::iter::Skip;
+mod feistel;
 
-pub mod feistel;
+use crate::feistel::FeistelNetwork;
+use bytemuck::bytes_of_mut;
+use sha2::{Digest, Sha512};
 
+pub type Seed = [u8; 32];
+
+/// A cryptographically secure random wordle generator.
 pub struct Wordle<'a, T: AsRef<str>> {
-    day: usize,
     words: &'a [T],
-    //key: &'a [u8; KEY_LEN],
-    network: FeistelNetwork,
+    window_len: u64,
+    seed: Seed,
+    hasher: Sha512,
+    network: FeistelNetwork<8>,
 }
 
 impl<'a, T: AsRef<str>> Wordle<'a, T> {
-    pub fn new(words: &'a [T]) -> Self {
-        let network_len = FeistelNetwork::bit_len_for(words.len());
-        Wordle {
-            day: 0,
+    /// Creates a new generator seeded via [`rand::random`].
+    pub fn new(words: &'a [T], window_len: u64) -> Self {
+        Self::from_seed(words, window_len, rand::random())
+    }
+
+    /// Creates a new generator using a seed.
+    pub fn from_seed(words: &'a [T], window_len: u64, seed: Seed) -> Self {
+        Self {
             words,
-            network: FeistelNetwork::new(network_len),
+            window_len,
+            seed,
+            hasher: Sha512::new(),
+            network: FeistelNetwork::for_domain(words.len()),
         }
     }
 
-    pub fn with_key(words: &'a [T], key: [u64; ROUNDS]) -> Self {
-        let network_len = FeistelNetwork::bit_len_for(words.len());
-        Wordle {
-            day: 0,
-            words,
-            network: FeistelNetwork::with_keys(network_len, key),
-        }
+    fn update_window(&mut self, window: u64) {
+        // SHA512 produces enough output for 8 64-bit round keys
+        let key_bytes = bytes_of_mut(self.network.keys_mut());
+        self.hasher.update(&self.seed);
+        self.hasher.update(&window.to_ne_bytes());
+        Digest::finalize_into_reset(&mut self.hasher, key_bytes.into());
     }
-}
 
-impl<'a, T: AsRef<str>> Iterator for Wordle<'a, T> {
-    type Item = &'a str;
+    /// Returns the word for the given day.
+    pub fn get(&mut self, day: u64) -> &'a str {
+        let window = day / self.window_len;
+        self.update_window(window);
 
-    fn next(&mut self) -> Option<Self::Item> {
-        let mut idx = self.network.permute(self.day as u64);
+        let day = day % self.window_len;
+        let mut idx = self.network.permute(day);
         while idx >= self.words.len() as u64 {
             idx = self.network.permute(idx);
         }
-
-        let word = self.words[idx as usize].as_ref();
-
-        self.day += 1;
-        if self.day == self.words.len() {
-            // todo: roll key
-            self.day = 0;
-        }
-        Some(word)
-    }
-
-    /*fn advance_by(&mut self, n: usize) -> Result<(), usize> {
-        self.day = (self.day + n) % self.words.len();
-        Ok(())
-    }*/
-
-    fn nth(&mut self, n: usize) -> Option<Self::Item> {
-        self.day = (self.day + n) % self.words.len();
-        // todo: roll key if necessary
-        self.next()
+        self.words[idx as usize].as_ref()
     }
 }

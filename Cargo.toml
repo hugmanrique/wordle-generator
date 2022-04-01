@@ -11,8 +11,10 @@ keywords = ["wordle", "random", "feistel"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+bytemuck = "1.9.0"
 rand = "0.8.5"
 wyhash = "0.5.0"
+sha2 = "0.10.2"
 
 [dev-dependencies]
 lazy_static = "1.4.0"
