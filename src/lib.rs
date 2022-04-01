@@ -12,6 +12,9 @@ pub struct Wordle<'a, T: AsRef<str>> {
     window_len: u64,
     seed: Seed,
     hasher: Sha512,
+    // The Luby-Rackoff theorem shows that 4 rounds are enough to resist all
+    // adaptive chosen plaintext and chosen ciphertext attacks, for sufficiently
+    // large block sizes. However, we support arbitrarily small domains.
     network: FeistelNetwork<8>,
 }
 

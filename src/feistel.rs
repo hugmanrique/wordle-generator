@@ -5,10 +5,7 @@ type Keys<const ROUNDS: usize> = [u64; ROUNDS];
 
 /// A Feistel network of length `2n` provides a random permutation
 /// of the set {0, 1, ..., 2^(2n - 1)}, determined by the round keys.
-// The Luby-Rackoff theorem shows that 4 rounds are enough to resist all
-// adaptive chosen plaintext and chosen ciphertext attacks, for sufficiently
-// large block sizes. However, we support arbitrarily small domains.
-pub(crate) struct FeistelNetwork<const ROUNDS: usize = 8> {
+pub(crate) struct FeistelNetwork<const ROUNDS: usize> {
     keys: Keys<ROUNDS>,
     upper_shift: u8,
     lower_mask: u64,
@@ -64,6 +61,7 @@ impl<const ROUNDS: usize> FeistelNetwork<ROUNDS> {
     /// # Panics
     ///
     /// Panics if `bit_len` is odd, equal to zero, or greater than `u64::BITS`.
+    #[allow(dead_code)]
     pub fn with_keys(bit_len: u8, keys: Keys<ROUNDS>) -> Self {
         let mut network = Self::new(bit_len);
         network.keys_mut().copy_from_slice(&keys);
