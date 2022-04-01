@@ -3,6 +3,8 @@ use wyhash::WyHash;
 
 type Keys<const ROUNDS: usize> = [u64; ROUNDS];
 
+/// A Feistel network of length `2n` provides a random permutation
+/// of the set {0, 1, ..., 2^(2n - 1)}, determined by the round keys.
 // The Luby-Rackoff theorem shows that 4 rounds are enough to resist all
 // adaptive chosen plaintext and chosen ciphertext attacks, for sufficiently
 // large block sizes. However, we support arbitrarily small domains.

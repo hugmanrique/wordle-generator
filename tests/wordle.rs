@@ -63,8 +63,8 @@ fn all_words_before_new_start() {
 
     let mut occurrences = HashMap::new();
     for i in 1..=5 {
-        for j in 0..WORDS.len() as u64 {
-            let word = wordle.get(j);
+        for day in 0..WORDS.len() as u64 {
+            let word = wordle.get(day);
             let entry = occurrences.entry(word).or_insert(0);
             *entry += 1;
         }
